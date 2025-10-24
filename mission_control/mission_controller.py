@@ -635,7 +635,7 @@ class MissionController:
                                         rospy.loginfo("Missione già eseguita. Attendere il caricamento di una nuova missione.")
                                     else:
                                         self.is_valid_mission = True
-                                        self.planner_ripristinato = True
+                                        # self.planner_ripristinato = True
                                         rospy.loginfo("Riprendo la missione precedentemente iniziata e abortita.")
                                         
                                 except StopIteration:
@@ -737,24 +737,30 @@ class MissionController:
                         # Se il planner non riesce a generare cmd_vel validi
                         # Se i recovery behavior non riescono a risolvere il problema
                         if self.planner_ripristinato:
-                            self.planner_ripristinato = False
-                            rospy.loginfo("Procedo al waypoint successivo.")
-                            waypoint = self.waypoints[self.mission_index]
-                            goal = MoveBaseGoal()
-                            goal.target_pose.header = Header()
-                            goal.target_pose.header.seq = self.mission_index
-                            goal.target_pose.header.stamp = rospy.Time.now()
-                            goal.target_pose.header.frame_id = "map"
-                            goal.target_pose.pose.position.x = waypoint[0]
-                            goal.target_pose.pose.position.y = waypoint[1]
-                            goal.target_pose.pose.position.z = 0.0
-                            goal.target_pose.pose.orientation.w = 1.0
-                            goal.target_pose.pose.orientation.x = 0.0
-                            goal.target_pose.pose.orientation.y = 0.0
-                            goal.target_pose.pose.orientation.z = 0.0
-                            rospy.loginfo(f"Invio del Goal ActionLib: X={waypoint[0]}, Y={waypoint[1]} m nel frame '{FRAME_ID_MAP}'")
-                            self.move_base_client.send_goal(goal)
-                            self.mission_index += 1
+                            # Controllo che il waypoint non raggiungibile non sia l'utlimo
+                            if self.index < len(self.waypoints):
+                                self.planner_ripristinato = False
+                                rospy.loginfo("Procedo al waypoint successivo.")
+                                waypoint = self.waypoints[self.mission_index]
+                                goal = MoveBaseGoal()
+                                goal.target_pose.header = Header()
+                                goal.target_pose.header.seq = self.mission_index
+                                goal.target_pose.header.stamp = rospy.Time.now()
+                                goal.target_pose.header.frame_id = "map"
+                                goal.target_pose.pose.position.x = waypoint[0]
+                                goal.target_pose.pose.position.y = waypoint[1]
+                                goal.target_pose.pose.position.z = 0.0
+                                goal.target_pose.pose.orientation.w = 1.0
+                                goal.target_pose.pose.orientation.x = 0.0
+                                goal.target_pose.pose.orientation.y = 0.0
+                                goal.target_pose.pose.orientation.z = 0.0
+                                rospy.loginfo(f"Invio del Goal ActionLib: X={waypoint[0]}, Y={waypoint[1]} m nel frame '{FRAME_ID_MAP}'")
+                                self.move_base_client.send_goal(goal)
+                                self.mission_index += 1
+                            else:
+                                rospy.loginfo(f"Impossibile raggiungere l'ultimo waypoint, missione terminta negativamente.")
+                                self.is_mission_valid = False
+                                self.mission_index = 0
                         else:
                             rospy.logerr(f"Errore: impossibile raggiungere il Waypoint {self.mission_index}. Stato del planner: {self.navigation_status}")
                             self.minor_error = True
@@ -877,7 +883,7 @@ class MissionController:
         elif self.usv_status == mappa_degli_stati_usv[3]:
             rospy.loginfo("STATO: errore minore. Identificazione dell'errore.")
             if not self.minor_error:
-                self.jump_to_state(1) # Torno in stato 1: in navigazione
+                self.jump_to_state(0) # Torno in stato 0: idle (riparte il meccanismo di missione)
                 
             elif self.major_error:
                 self.jump_to_state(4) # Passo in 4: 'errore critico'
