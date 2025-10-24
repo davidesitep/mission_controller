@@ -642,6 +642,7 @@ class MissionController:
                                     else:
                                         self.is_valid_mission = True
                                         # self.planner_ripristinato = True
+                                        # Qui sarebbe corretto inserire un caricamento della missione interrotta
                                         rospy.loginfo("Riprendo la missione precedentemente iniziata e abortita.")
                                         
                                 except StopIteration:
