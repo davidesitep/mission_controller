@@ -42,7 +42,7 @@ class system_status_struct(NamedTuple):
 
 
 # Classe dedicata al monitoraggio dello stato dell'USV
-class USV_monitor:
+class UsvDiagnostic:
 
     def __init__(self):
         # Timeout e soglie
@@ -52,16 +52,16 @@ class USV_monitor:
         self.min_satellites = rospy.get_param("~min_satellites", 6)
 
         # Stato interno diagnostic node
-        self.diagnostic_stato_gps = None
-        self.diagnostic_stato_imu = None
-        self.diagnostic_stato_ekf = None
-        self.diagnostic_stato_gpsvel = None
-        self.diagnostic_stato_gpshdt = None
-        self.diagnostic_stato_mag = None
-        self.diagnostic_stato_shipm = None
-        self.diagnostic_stato_generale = None
-        self.diagnostic_stato_motore = None
-        self._status = system_status_struct(True, True, True, True, 0, True, 0, True, True, True, 0)
+        self._diagnostic_stato_gps = None
+        self._diagnostic_stato_imu = None
+        self._diagnostic_stato_ekf = None
+        self._diagnostic_stato_gpsvel = None
+        self._diagnostic_stato_gpshdt = None
+        self._diagnostic_stato_mag = None
+        self._diagnostic_stato_shipm = None
+        self._diagnostic_stato_generale = None
+        self._diagnostic_stato_motore = None
+        self.status = system_status_struct(True, True, True, True, 0, True, 0, True, True, True, 0)
 
         # Subscribers
         sub_imu = rospy.Subscriber("/sbg/imu_data", SbgImuData, self.imu_callback)
@@ -77,58 +77,66 @@ class USV_monitor:
         # Publisher
         self.status_pub = rospy.Publisher("/usv_status_monitor/diagnostic/status", SystemStatus, queue_size=10)
     
-    # Calcolo stato del sensore ellipse
+    
     def general_status_callback(self, msg):
+        """
+        Calcolo stato del sensore Ellipse.
+        """
         main_power = not(msg.main_power)
         imu_power = not(msg.imu_power)
         gps_power = not(msg.gps_power)
 
         if main_power:
-            self.diagnostic_stato_generale = 0 # System off
+            self._diagnostic_stato_generale = 0 # System off
         elif not main_power and imu_power:
-            self.diagnostic_stato_generale = 1 # Imu off
+            self._diagnostic_stato_generale = 1 # Imu off
         elif not main_power and gps_power:
-            self.diagnostic_stato_generale = 2 # GPS off
+            self._diagnostic_stato_generale = 2 # GPS off
         elif imu_power and gps_power:
-            self.diagnostic_stato_generale = 3 # Both sensor off
+            self._diagnostic_stato_generale = 3 # Both sensor off
         else:
-            self.diagnostic_stato_generale = 4 # Sensor OK
+            self._diagnostic_stato_generale = 4 # Sensor OK
 
-    # Calcolo stato della IMU
     def imu_callback(self, msg):
+        """
+        Calcola lo stato dell imu.
+        """
         if not msg.status.imu_com:
-            self.diagnostic_stato_imu = 0 # No Communication
+            self._diagnostic_stato_imu = 0 # No Communication
         elif msg.status.imu_com and not msg.status.imu_status:
-            self.diagnostic_stato_imu = 1 # No Calibration (poor)
+            self._diagnostic_stato_imu = 1 # No Calibration (poor)
         elif msg.status.imu_com and not msg.status.imu_accels_in_range:
-            self.diagnostic_stato_imu = 2 # Unexpected linear acceleration (poor)
+            self._diagnostic_stato_imu = 2 # Unexpected linear acceleration (poor)
         elif msg.status.imu_com and not msg.status.imu_gyros_in_range:
-            self.diagnostic_stato_imu = 3 # Unexpected angular acceleration (poor)
+            self._diagnostic_stato_imu = 3 # Unexpected angular acceleration (poor)
         elif not msg.status.imu_accels_in_range and not msg.status.imu_gyros_in_range:
-            self.diagnostic_stato_imu = 4 # Unexpected acceleration (very poor)
+            self._diagnostic_stato_imu = 4 # Unexpected acceleration (very poor)
         else:
-            self.diagnostic_stato_imu = 5 # Imu OK
+            self._diagnostic_stato_imu = 5 # Imu OK
 
-    # Calcolo stato del GPS
     def gps_callback(self, msg):
-        
+        """
+        Calcolo stato del GPS.
+        """
         if msg.status.status != 0:
-            self.diagnostic_stato_gps = 0 # Internal error
+            self._diagnostic_stato_gps = 0 # Internal error
         else:
                     
             if msg.status.type >= 6:
-                self.diagnostic_stato_gps = 1 # Optimum
+                self._diagnostic_stato_gps = 1 # Optimum
             elif msg.status.type in [3,5]:
-                self.diagnostic_stato_gps = 2 # Good
+                self._diagnostic_stato_gps = 2 # Good
             elif msg.status.type in [2,4]:
-                self.diagnostic_stato_gps = 3 # Poor
+                self._diagnostic_stato_gps = 3 # Poor
             elif msg.status.type in [0,1]:
-                self.diagnostic_stato_gps = 4 # None
+                self._diagnostic_stato_gps = 4 # None
             else:
-                self.diagnostic_stato_gps = 4 # None
+                self._diagnostic_stato_gps = 4 # None
                     
-    # Calcolo stato del EKF
     def ekf_callback(self, msg):
+        """
+        Calcolo stato del EKF.
+        """
         fault_count = 0
         if not msg.status.attitude_valid:
             fault_count += 1
@@ -148,157 +156,156 @@ class USV_monitor:
         elif fault_count == 3:
             self.diagnostic_stato_ekf = 3 # Ekf None
 
-    # Calcolo stato gps vel
     def gps_vel_callback(self, msg):
-
+        """
+        Calcolo stato gps vel.
+        """
         if msg.status.vel_status != 0:
-            self.diagnostic_stato_gpsvel = 0 # Internal error
+            self._diagnostic_stato_gpsvel = 0 # Internal error
         else:
                     
             if msg.status.vel_type == 0:
-                self.diagnostic_stato_gps = 1 # No valid velocity (none)
+                self._diagnostic_stato_gps = 1 # No valid velocity (none)
             elif msg.status.vel_type == 1:
-                self.diagnostic_stato_gps = 2 # Unknown solution (very poor)
+                self._diagnostic_stato_gps = 2 # Unknown solution (very poor)
             elif msg.status.vel_type == 2:
-                self.diagnostic_stato_gps = 3 # Doppler velocity (good)
+                self._diagnostic_stato_gps = 3 # Doppler velocity (good)
             elif msg.status.vel_type == 4:
-                self.diagnostic_stato_gps = 4 # Differential velocity (very good)
+                self._diagnostic_stato_gps = 4 # Differential velocity (very good)
             else:
-                self.diagnostic_stato_gps = 1 # None
+                self._diagnostic_stato_gps = 1 # None
 
-    # Calcolo stato gps hdt
     def gps_hdt_callback(self, msg):
+        """
+        Calcolo stato gps hdt.
+        """
         if msg.status == 0:
-            self.diagnostic_stato_gpshdt = 0 # Solution computed
+            self._diagnostic_stato_gpshdt = 0 # Solution computed
         else:
-            self.diagnostic_stato_gpshdt = 1 # Internal error
+            self._diagnostic_stato_gpshdt = 1 # Internal error
 
-    # Calcolo stato magnetometro
     def mag_callback(self, msg):
+        """
+        Calcolo stato magnetometro.
+        """
         if not msg.status.mags_in_range:
-            self.diagnostic_stato_mag = 0 # Mag not in range
+            self._diagnostic_stato_mag = 0 # Mag not in range
         elif not msg.status.accels_in_range:
-            self.diagnostic_stato_mag = 1 # Mag acceleration not in range
+            self._diagnostic_stato_mag = 1 # Mag acceleration not in range
         elif not msg.status.calibration:
-            self.diagnostic_stato_mag = 2 # Mag not calibrated
+            self._diagnostic_stato_mag = 2 # Mag not calibrated
         else:
-            self.diagnostic_stato_mag = 3 # Mag ok
+            self._diagnostic_stato_mag = 3 # Mag ok
 
-    # Qui decido in che stato porre il sistema in base alle condizioni dei vari sensori
-    def check_status(self):
+    def get_usv_status(self):
+        """ 
+        Qui decido in che stato porre il sistema in base alle condizioni dei vari sensori.
+        """
         now = rospy.get_time()
         status = Int16()
         # ---------------- Sensor off --------------------
-        if self.diagnostic_stato_generale in [0,3]:
-            self._status.sensor_presence = False # Sensore spento: la navigazione può continuare solo in modalità guida remota 
+        if self._diagnostic_stato_generale in [0,3]:
+            self.status.sensor_presence = False # Sensore spento: la navigazione può continuare solo in modalità guida remota 
         # ---------------- Imu off --------------------
-        elif self.diagnostic_stato_generale == 1: # Imu off
-            self._status.imu_presence = False
-            self._status.gps_presence = True
+        elif self._diagnostic_stato_generale == 1: # Imu off
+            self.status.imu_presence = False
+            self.status.gps_presence = True
             # Se non c'è la Imu devo capire cosa posso fare con il GPS
-            if self.diagnostic_stato_gpsvel in [3,4]: # Velocità calcolata
-                self._status.is_gpsvel = True
+            if self._diagnostic_stato_gpsvel in [3,4]: # Velocità calcolata
+                self.status.is_gpsvel = True
             else:
-                self._status.is_gpsvel = False # Non è possibile calcolare la velocità del mezzo dal GPS
+                self.status.is_gpsvel = False # Non è possibile calcolare la velocità del mezzo dal GPS
             
-            if self.diagnostic_stato_gpshdt == 0: # hdt da Gps ok
-                self._status.is_gps_hdt = True
+            if self._diagnostic_stato_gpshdt == 0: # hdt da Gps ok
+                self.status.is_gps_hdt = True
             else:
-                self._status.is_gps_hdt = False
+                self.status.is_gps_hdt = False
             
-            if self.diagnostic_stato_gps in [1,2,3]:
-                self._status.is_gpspos = True
+            if self._diagnostic_stato_gps in [1,2,3]:
+                self.status.is_gpspos = True
             else:
-                self._status.is_gpspos = False
+                self.status.is_gpspos = False
             
-            self._status.gps_type = self.diagnostic_stato_gps
-            self._status.gps_vel_type = self.diagnostic_stato_gpsvel
+            self.status.gps_type = self._diagnostic_stato_gps
+            self.status.gps_vel_type = self._diagnostic_stato_gpsvel
 
         # ---------------- Gps off --------------------
-        elif self.diagnostic_stato_generale == 2:
-            self._status.gps_presence = False
-            self._status.imu_presence = True
+        elif self._diagnostic_stato_generale == 2:
+            self.status.gps_presence = False
+            self.status.imu_presence = True
             # Se gps off devo controllare solo imu e magnetometro sono in dead reckoning
-            if self.diagnostic_stato_imu:
-                self._status.is_imu = True
+            if self._diagnostic_stato_imu:
+                self.status.is_imu = True
             else:
                 self.is_imu = False
             
-            if self.diagnostic_stato_mag in [2,3]:
-                self._status.is_magnetometer = True
+            if self._diagnostic_stato_mag in [2,3]:
+                self.status.is_magnetometer = True
             else:
-                self._status = False
+                self.status = False
             
         # ---------------- Both Senson on --------------------
-        elif self.diagnostic_stato_generale == 4: # Sensor On
-            self._status.gps_presence = True
-            self._status.imu_presence = True
+        elif self._diagnostic_stato_generale == 4: # Sensor On
+            self.status.gps_presence = True
+            self.status.imu_presence = True
 
-            if self.diagnostic_stato_gpsvel in [3,4]: # Velocità calcolata
-                self._status.is_gpsvel = True
+            if self._diagnostic_stato_gpsvel in [3,4]: # Velocità calcolata
+                self.status.is_gpsvel = True
             else:
-                self._status.is_gpsvel = False # Non è possibile calcolare la velocità del mezzo dal GPS
+                self.status.is_gpsvel = False # Non è possibile calcolare la velocità del mezzo dal GPS
             
-            if self.diagnostic_stato_gpshdt == 0: # hdt da Gps ok
-                self._status.is_gps_hdt = True
+            if self._diagnostic_stato_gpshdt == 0: # hdt da Gps ok
+                self.status.is_gps_hdt = True
             else:
-                self._status.is_gps_hdt = False
+                self.status.is_gps_hdt = False
             
             if self.diagnostic_stato_gps in [1,2,3]:
-                self._status.is_gpspos = True
+                self.status.is_gpspos = True
             else:
-                self._status.is_gpspos = False
+                self.status.is_gpspos = False
             
-            if self.diagnostic_stato_imu:
-                self._status.is_imu = True
+            if self._diagnostic_stato_imu:
+                self.status.is_imu = True
             else:
                 self.is_imu = False
             
-            if self.diagnostic_stato_mag in [2,3]:
-                self._status.is_magnetometer = True
+            if self._diagnostic_stato_mag in [2,3]:
+                self.status.is_magnetometer = True
             else:
-                self._status = False
+                self.status = False
             
-            self._status.gps_type = self.diagnostic_stato_gps
-            self._status.gps_vel_type = self.diagnostic_stato_gpsvel
+            self.status.gps_type = self.diagnostic_stato_gps
+            self.status.gps_vel_type = self._diagnostic_stato_gpsvel
             
-        return self._status
-        
-    def set_bit(self, val, i):
-        val = val | (1 << i)
-        return val
+        return self.status
     
-    def reset_bit(self, val, i):
-        val = val & (~(1 << i))
-        return val
-    
-    def publish_system_status(self, status_msg):
-        new_status_msg = SystemStatus()
-        # new_status_msg.header = Header(stamp=rospy.Time.now(), frame_id="nav_sensors_monitor")
-        new_status_msg.sensor_presence = status_msg.sensor_presence
-        new_status_msg.imu_presence = status_msg.imu_presence
-        new_status_msg.gps_presence = status_msg.gps_presence
-        new_status_msg.is_gpspos = status_msg.is_gpspos
-        new_status_msg.gps_type = status_msg.gps_type
-        new_status_msg.is_gpsvel = status_msg.is_gpsvel
-        new_status_msg.gps_vel_type = status_msg.gps_vel_type
-        new_status_msg.is_gps_hdt = status_msg.is_gps_hdt
-        new_status_msg.is_magnetometer = status_msg.is_magnetometer
-        new_status_msg.is_imu = status_msg.is_imu
-        new_status_msg.ekf_status = status_msg.ekf_status
-        self.status_pub.publish(new_status_msg)
+    # def publish_system_status(self, status_msg):
+    #     new_status_msg = SystemStatus()
+    #     # new_status_msg.header = Header(stamp=rospy.Time.now(), frame_id="nav_sensors_monitor")
+    #     new_status_msg.sensor_presence = status_msg.sensor_presence
+    #     new_status_msg.imu_presence = status_msg.imu_presence
+    #     new_status_msg.gps_presence = status_msg.gps_presence
+    #     new_status_msg.is_gpspos = status_msg.is_gpspos
+    #     new_status_msg.gps_type = status_msg.gps_type
+    #     new_status_msg.is_gpsvel = status_msg.is_gpsvel
+    #     new_status_msg.gps_vel_type = status_msg.gps_vel_type
+    #     new_status_msg.is_gps_hdt = status_msg.is_gps_hdt
+    #     new_status_msg.is_magnetometer = status_msg.is_magnetometer
+    #     new_status_msg.is_imu = status_msg.is_imu
+    #     new_status_msg.ekf_status = status_msg.ekf_status
+    #     self.status_pub.publish(new_status_msg)
 
-    def spin(self):
-        rate = rospy.Rate(1)  # 1 Hz
-        while not rospy.is_shutdown():
-            status_msg = self.check_status()
-            self.publish_system_status(status_msg)
-            rate.sleep()
+#     def spin(self):
+#         rate = rospy.Rate(1)  # 1 Hz
+#         while not rospy.is_shutdown():
+#             status_msg = self.check_status()
+#             self.publish_system_status(status_msg)
+#             rate.sleep()
 
 
-if __name__ == "__main__":
-    rospy.init_node("usv_status_monitor")
-    monitor = USV_monitor()
-    monitor.spin()
+# if __name__ == "__main__":
+#     rospy.init_node("usv_status_monitor")
+#     monitor = USV_monitor()
+#     monitor.spin()
 
 

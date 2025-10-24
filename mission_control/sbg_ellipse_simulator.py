@@ -12,6 +12,8 @@ from sbg_driver.msg import (
     SbgMag, SbgAirData, SbgShipMotion,
     SbgStatusGeneral  
 )
+import PySimpleGUI as sg
+sg.home()
 
 # Variabili di stato GPS
 gps_type = {
