@@ -903,6 +903,15 @@ class MissionController:
                 elif "motore fuori uso" in self.errori_minori:
                     self.major_error = True
 
+                elif self.navigation_status == mappa_move_base_status[4]:
+                    rospy.loginfo("Errore del local planner: Non ci sono errori che impediscano la navigazione. La missione continuerà dal waypoint successivo.")
+                    self.minor_error = False
+                    self.planner_ripristinato = True
+
+                else:
+                    rospy.loginfo("Errore falso: il sistema di monitoraggio del veicolo non ha rilevato alcun malfunzionamento. La missione può riprendere.")
+                    self.minor_error = False
+
                 rospy.logerr("Fermata di emergenza! Identificazione dell'errore.")
                 # Qui potrei implementare una logica per tentare di risolvere il problema o attendere l'intervento umano
                 # Torno in stato 0: inattivo in attesa, per ora se c'è una fermata di emergenza devo intervenire manualmente
