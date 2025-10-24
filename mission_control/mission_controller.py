@@ -73,10 +73,16 @@ mappa_move_base_status = {
    -1: "UNKNOWN"
 }
 
-mappa_errori_minori = {
+mappa_errori = {
     0: "sensore fuori uso",
     1: "motore fuori uso",
-    2: "errore planner"
+    2: "errore planner",
+    3: "errore del localizzatore"
+}
+
+mappa_errori_planner = {
+    0: "Errore del navigation server".
+    1: "Errore di calcolo percorso"
 }
 
 mappa_errore_sensori = {
@@ -938,7 +944,7 @@ class MissionController:
                 self.jump_to_state(3)
                 
             else:
-                self.jump_to_state(1)
+                self.jump_to_state(0)
                 
         # Navigazione in avvio: prima di passare alla navigazione vera e propria devo verificare che sia tutto ok
         # In particolare deve essere attivo: il planner, la trosformata della posa (tf) e in futuro dovrò controllare che il l'obstacle avoidance sia attivo 
