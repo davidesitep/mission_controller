@@ -818,18 +818,35 @@ class MissionController:
                                                                                 
                     # if PENDING
                     elif self.navigation_status == mappa_move_base_status[0]: # PENDING
-                        rospy.loginfo("In attesa che il planner calcolila rotta...")
+                        rospy.loginfo("Goal pending: in attesa che il goal precedente venga terminato...")
                         if self.pending_time is None:
                             self.pending_time = rospy.get_time()
 
-                        if self.pending_time and (rospy.get_time() - self.pending_time) > 300: # Se il planner è in pending da più di due minuti
+                        if self.pending_time and (rospy.get_time() - self.pending_time) > 120: # Se il planner è in pending da più di due minuti
                             # Devo controllare se il planner è bloccato
                             # Devo controllare che i sensori siano attivi
                             # Devo controllare che il target sia raggiungibile 
-                            rospy.logerr("Errore: il planner non riesce a calcolare una rotta. Passo in stato di fermata di emergenza.")
+                            rospy.logerr("Errore: goal bloccato verrà eliminato e inviato nuovamente.")
                             self.pending_time = None 
-                            self.jump_to_state(3) # Passa a 3: 'errore minore'
-                            
+                            self.move_base_client.cancel_goal() # Cancella il goal pending, l'ultimo inviato
+                            rospy.sleep(0.5)
+                            rospy.loginfo(f"In attesa di cancellazione del goal {self.mission_index-1}...")
+                            goal = MoveBaseGoal()
+                            goal.target_pose.header = Header()
+                            goal.target_pose.header.seq = self.mission_index
+                            goal.target_pose.header.stamp = rospy.Time.now()
+                            goal.target_pose.header.frame_id = "map"
+                            goal.target_pose.pose.position.x = self.waypoints[self.mission_index-1][0]
+                            goal.target_pose.pose.position.y = self.waypoints[self.mission_index-1][1]
+                            goal.target_pose.pose.position.z = 0.0
+                            goal.target_pose.pose.orientation.w = 1.0
+                            goal.target_pose.pose.orientation.x = 0.0
+                            goal.target_pose.pose.orientation.y = 0.0
+                            goal.target_pose.pose.orientation.z = 0.0
+                            # ------------------------------------------------
+                            rospy.loginfo(f"Invio del Goal ActionLib: X={waypoint[0]}, Y={waypoint[1]} m nel frame '{FRAME_ID_MAP}'")
+                            self.move_base_client.send_goal(goal)
+                            self.mission_index = wp_piu_vicino + 1
                         else:
                             # Resto in attesa che il planner calcoli la rotta
                             pass
