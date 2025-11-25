@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Garmin Connect" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Esempio di traccia</name>
+    <time>2025-10-13T09:53:00Z</time>
+  </metadata>
+  <trk>
+    <name>La mia escursione</name>
+    <trkseg>
+      <trkpt lat="4.0" lon="2.0">
+        <ele>720.5</ele>
+        <time>2025-09-10T10:00:00Z</time>
+      </trkpt>
+      <trkpt lat="2.0" lon="0.0">
+        <ele>0.0</ele>
+        <time>2025-09-10T10:01:15Z</time>
+      </trkpt>
+      <trkpt lat="0.0" lon="2.0">
+        <ele>0.0</ele>
+        <time>2025-09-10T10:02:30Z</time>
+      </trkpt>
+      <trkpt lat="2.0" lon="4.0">
+        <ele>0.0</ele>
+        <time>2025-09-10T10:02:30Z</time>
+      </trkpt>
+      <trkpt lat="4.0" lon="2.0">
+        <ele>720.5</ele>
+        <time>2025-09-10T10:00:00Z</time>
+      </trkpt>
+      <!-- Altri punti della traccia -->
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,0 +1,7 @@
+roslaunch turtlebot3_gazebo turtlebot3_world.launch // Lancia gazebo
+roslaunch turtlebot3_slam turtlebot3_slam.launch slam_methods:=gmapping // Lancia Rviz con slam
+roslaunch turtlebot3_teleop turtlebot3_teleop_key.launch // Lancia il comando via 'joystick'
+rosrun map_server map_saver -f ~/map // Salva una mappa ottenuto con lo slam
+roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=$HOME/map.yaml
+rostopic pub -r 1 /cc/remote_cmd std_msgs/Bool "data: true"
+
