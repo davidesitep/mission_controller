@@ -54,7 +54,7 @@ class missionExtInterface():
         # self.global_position = [None, None] # Latitudine e longitudine
         # self.usv_status = None
         self.last_cmd_vel_time = None
-        self.sub_cc_cmd_vel = rospy.Subscriber('/teleop/cmd_vel', Twist, self.cmd_vel_cc_callback)
+        self.sub_cc_cmd_vel = rospy.Subscriber('/CC/cmd_vel', Twist, self.cmd_vel_cc_callback)
         self.sub_remote_request = rospy.Subscriber('/cc/remote_cmd', Bool, self.control_required_callback)
         self.sub_mission_file = rospy.Subscriber('/mission_file', String, self.mission_file_callback)
         self.pub_vel = rospy.Publisher(f'/drone{drone_id}/vel', Twist, queue_size=10)
@@ -190,7 +190,7 @@ class missionExtInterface():
 
         heading_rad = math.atan2(num, denom)
 
-        heading_deg = math.degrees(heading_deg)
+        heading_deg = math.degrees(heading_rad)
         
         # Normalizzazione a [0, 360] gradi (il Nord è 0/360, Est è 90)
         # math.degrees() restituisce un valore tra -180 e 180.

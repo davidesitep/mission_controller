@@ -17,6 +17,7 @@ import glob
 import actionlib
 from collections import deque
 import time
+import json
 from typing import NamedTuple
 from std_msgs.msg import Header
 from std_msgs.msg import String
@@ -38,9 +39,13 @@ from rosgraph import Master, MasterException
 
 DEBUG = True
 MISSION_DIRECTORY_PATH = "/home/davide/Scrivania/MISSION_CONTROLLER/mission_control"
+MISSIONS_JSON_FILE = os.path.join(MISSION_DIRECTORY_PATH, "missions_history.json")
+DRONE_ID = 1
 # --- Timeout di Sistema ---
 CMD_VEL_TIMEOUT = 30 # Tempo in secondi (5 minuti) dopo il quale se non ricevo comandi di velocità torno in stato 0: inattivo in attesa
+INACTIVITY_TIMEOUT = 900 # Secondi (15 minuti) dopo il quale se non ricevo comandi di velocità torno in stato 0: inattivo in attesa
 MB_SERVER_TIMEOUT = 5 # Secondi
+PENDING_TIMEOUT = 120
 MAX_MBS_RETRY_CNT = 3
 # --- Frame di Riferimento ---
 # FRAME_ID_MAP: Il frame globale di move_base (solitamente 'map')
@@ -55,13 +60,13 @@ TO_SEC = 1000000000
 ROSTIMEOUT = 10 # secondi
 
 mappa_degli_stati_usv = {
-    0: "inattivo in attesa",
-    1: "in navigazione",
-    2: "controllo remoto",
-    3: "errore minore", # il planner non è riuscito a calcolare una rotta per raggiungere il waypoint
-    4: "errore critico", # usv non risponde
-    5: "avvio nav. autonoma"
-}
+    0: "In attesa",
+    1: "Avvio nav. autonoma",
+    2: "Navigazione autonoma",
+    3: "Navigazione da remoto",
+    4: "Errore minore", 
+    5: "Errore critico"
+    }
 
 mappa_move_base_status = {
     0: "PENDING",
@@ -81,7 +86,7 @@ mappa_errori = {
 }
 
 mappa_errori_planner = {
-    0: "Errore del navigation server".
+    0: "Errore del navigation server",
     1: "Errore di calcolo percorso"
 }
 
@@ -122,6 +127,7 @@ class MissionController:
         self.errori_minori = []
         self.planner_ripristinato = False
         self.missions = []
+        self.load_missions_from_json()  # Carica le missioni dal file JSON all'avvio
         self.waypoints_reached = 0
         self.can_jump = False
         self.lunghezza_segmenti = []
@@ -141,19 +147,19 @@ class MissionController:
         self.system_status = Int16
         # Altre classi
         self.usvDiagnostic = UsvDiagnostic()
-        self.gndStationIf = missionExtInterface()
+        self.gndStationIf = missionExtInterface(MISSION_DIRECTORY_PATH, DRONE_ID)
         # Publisher e Subscriber
         #self.pub_waypoint = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
         self.pub_status = rospy.Publisher('/usv_status', Int32, queue_size=10)
         self.pub_vel_cmd = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self.gps_goal_2convert = rospy.Publisher('/initial_navsat_fix', NavSatFix, queue_size=1)
         self.pub_abort_current_goal = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
-        self.sub_cc_cmd_vel = rospy.Subscriber('/teleop/cmd_vel', Twist, self.cmd_vel_cc_callback) # spostato
+        self.sub_cc_cmd_vel = rospy.Subscriber('/CC/cmd_vel', Twist, self.cmd_vel_cc_callback) # spostato
         self.sub_move_base_cmd_vel = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_move_base_callback)
         #self.sub_goal_reached = rospy.Subscriber('/move_base/status', GoalStatusArray, self.usv_status_callback)
         self.goal_feedback = rospy.Subscriber('/move_base/feedback', MoveBaseActionFeedback, self.usv_feedback_callback)
         self.result = None 
-        self.sub_diagnostic_status = rospy.Subscriber('/diagnostic/status', Int16, self.diagnostic_status_callback)
+        self.sub_diagnostic_status = rospy.Subscriber('/usv_status_monitor/diagnostic/status', Int16, self.diagnostic_status_callback)
         self.sub_remote_request = rospy.Subscriber('/cc/remote_cmd', Bool, self.remote_cmd_callback) # spostato
         self.last_cmd_vel_time = None
         self.last_cmd_vel_time_move_base = None
@@ -430,20 +436,74 @@ class MissionController:
         self.missions = new_mission
         rospy.loginfo("Missione aggiornata")
 
+    def load_missions_from_json(self):
+        """
+        Carica le informazioni delle missioni dal file JSON.
+        """
+        try:
+            if os.path.isfile(MISSIONS_JSON_FILE):
+                with open(MISSIONS_JSON_FILE, 'r') as f:
+                    missions_data = json.load(f)
+                    self.missions = []
+                    for mission_dict in missions_data:
+                        mission = MissionInfo(
+                            mission_id=mission_dict['mission_id'],
+                            mission_status=mission_dict['mission_status'],
+                            total_waypoints=mission_dict['total_waypoints'],
+                            waypoint_reached=mission_dict['waypoint_reached'],
+                            total_distance=mission_dict['total_distance'],
+                            distance_traveled=mission_dict['distance_traveled'],
+                            mission_duration=mission_dict['mission_duration']
+                        )
+                        self.missions.append(mission)
+                    rospy.loginfo(f"Caricate {len(self.missions)} missioni dal file JSON.")
+            else:
+                rospy.loginfo("File di storia missioni non trovato. Inizio con lista vuota.")
+                self.missions = []
+        except Exception as e:
+            rospy.logerr(f"Errore nel caricamento delle missioni dal JSON: {e}")
+            self.missions = []
+
+    def save_missions_to_json(self):
+        """
+        Salva le informazioni delle missioni nel file JSON.
+        """
+        try:
+            missions_data = []
+            for mission in self.missions:
+                mission_dict = {
+                    'mission_id': mission.mission_id,
+                    'mission_status': mission.mission_status,
+                    'total_waypoints': mission.total_waypoints,
+                    'waypoint_reached': mission.waypoint_reached,
+                    'total_distance': mission.total_distance,
+                    'distance_traveled': mission.distance_traveled,
+                    'mission_duration': mission.mission_duration
+                }
+                missions_data.append(mission_dict)
+            
+            # Crea la directory se non esiste
+            os.makedirs(os.path.dirname(MISSIONS_JSON_FILE), exist_ok=True)
+            
+            with open(MISSIONS_JSON_FILE, 'w') as f:
+                json.dump(missions_data, f, indent=4)
+            rospy.loginfo(f"Missioni salvate nel file JSON: {MISSIONS_JSON_FILE}")
+        except Exception as e:
+            rospy.logerr(f"Errore nel salvataggio delle missioni nel JSON: {e}")
+
     def saveMissionInfo(self, mission_status="completed"):
         """
-        Salva localmente le informazione delle missioni eseguite e di quelle interrotte (abortite o sospese).
+        Salva localmente le informazione delle missioni eseguite e di quelle interrotte (abortite o sospese) in formato JSON.
         """
         lunghezza_totale = sum(self.lunghezza_segmenti) + math.sqrt((self.get_usv_pose()[0]-self.waypoints[0][0])**2 + 
                                                                     (self.get_usv_pose()[1]-self.waypoints[0][1])**2
                                                                     )
-        global missions
         mission = MissionInfo(
             mission_id=self.new_mission_id,
             mission_status=mission_status,
             total_waypoints=len(self.waypoints),
             waypoint_reached=self.mission_index-1, # L'ultimo waypoint raggiunto
-            total_distance=0.0,
+            total_distance=lunghezza_totale,
             distance_traveled=0.0,
             mission_duration=0.0 # Da implementare
         )
@@ -461,6 +521,9 @@ class MissionController:
         else:
             self.missions.append(mission)
             rospy.loginfo(f"Registrata nuova missione {self.new_mission_id} con stato {mission_status}.")
+        
+        # Salva le missioni nel file JSON
+        self.save_missions_to_json()
 
     def get_usv_pose(self):
         """
@@ -663,8 +726,8 @@ class MissionController:
                     rospy.loginfo("Nessuna missione trovata.")
             self.pub_status.publish(0) 
             
-        # Stato 1: In navigazione
-        elif self.usv_status == mappa_degli_stati_usv[1]:
+        # Stato 2: In navigazione
+        elif self.usv_status == mappa_degli_stati_usv[2]:
             
             rospy.loginfo("STATO: in navigazione autonoma")
             if self.is_remote_control:
@@ -823,7 +886,7 @@ class MissionController:
                         if self.pending_time is None:
                             self.pending_time = rospy.get_time()
 
-                        if self.pending_time and (rospy.get_time() - self.pending_time) > 120: # Se il planner è in pending da più di due minuti
+                        if self.pending_time and (rospy.get_time() - self.pending_time) > PENDING_TIMEOUT: # Se il planner è in pending da più di due minuti
                             # Devo controllare se il planner è bloccato
                             # Devo controllare che i sensori siano attivi
                             # Devo controllare che il target sia raggiungibile 
@@ -864,8 +927,8 @@ class MissionController:
                 
             self.pub_status.publish(1)
             
-        # Stato 2: Controllo remoto
-        elif self.usv_status == mappa_degli_stati_usv[2]:
+        # Stato 3: Controllo remoto
+        elif self.usv_status == mappa_degli_stati_usv[3]:
             rospy.loginfo("STATO: controllo remoto")
             if not self.is_remote_control:
                 self.last_cmd_vel_time = None
@@ -904,7 +967,7 @@ class MissionController:
         #           (teoricamente) Il USV non riesce a navigare (motori o timone in avaria) e va in modalità errore critico, manda un allarme per richiedere intervento esterno. 
         #           
         #           
-        elif self.usv_status == mappa_degli_stati_usv[3]:
+        elif self.usv_status == mappa_degli_stati_usv[4]:
             rospy.loginfo("STATO: errore minore. Identificazione dell'errore.")
             if not self.minor_error:
                 self.jump_to_state(0) # Torno in stato 0: idle (riparte il meccanismo di missione)
@@ -951,8 +1014,8 @@ class MissionController:
                 #self.sistem_check()
             self.pub_status.publish(3)
         
-        # Stato 4: Errore critico
-        elif self.usv_status == mappa_degli_stati_usv[4]:
+        # Stato 5: Errore critico
+        elif self.usv_status == mappa_degli_stati_usv[5]:
             rospy.loginfo("STATO: errore critico")
             if self.major_error:
                 self.pub_status.publish(4)
@@ -966,7 +1029,7 @@ class MissionController:
                 
         # Navigazione in avvio: prima di passare alla navigazione vera e propria devo verificare che sia tutto ok
         # In particolare deve essere attivo: il planner, la trosformata della posa (tf) e in futuro dovrò controllare che il l'obstacle avoidance sia attivo 
-        elif self.usv_status == mappa_degli_stati_usv[5]:
+        elif self.usv_status == mappa_degli_stati_usv[1]:
             # avvio l'actionclient per move_base
             rospy.loginfo("STATO: avvio planner")
             if self.is_remote_control:
@@ -1032,10 +1095,19 @@ class MissionController:
                 #         rospy.logwarn("Timeout: tf non risponde.")              
                 self.result = rospy.Subscriber('/move_base/status', MoveBaseActionResult, self.nav_result_callback)
 
+        elif self.usv_status == mappa_degli_stati_usv[6]: # Docking
+            if self.is_remote_control:
+                self.pub_abort_current_goal.publish(GoalID()) # Comando di abort
+                self.jump_to_state(3) # Passa a 3: 'controllo remoto'
+
+            
+            rospy.loginfo("STATO: docking in corso")
+
         # Stato non gestito
         else:
             rospy.logwarn(f"Stato non gestito: {self.usv_status}")
             self.usv_status = mappa_degli_stati_usv[0] # Torno in stato di idle
+            self.jump_to_state(0)
    
 
 def is_roscore_running_master_check():
@@ -1083,7 +1155,7 @@ def get_ASCII_art():
                     |  |
                  ___|  |___
                 /          \
-               /    ❤ ❤     \
+               /    ❤ ❤    \
               /              \
              /                \
     """

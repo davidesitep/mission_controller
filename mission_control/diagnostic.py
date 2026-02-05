@@ -279,33 +279,5 @@ class UsvDiagnostic:
             
         return self.status
     
-    # def publish_system_status(self, status_msg):
-    #     new_status_msg = SystemStatus()
-    #     # new_status_msg.header = Header(stamp=rospy.Time.now(), frame_id="nav_sensors_monitor")
-    #     new_status_msg.sensor_presence = status_msg.sensor_presence
-    #     new_status_msg.imu_presence = status_msg.imu_presence
-    #     new_status_msg.gps_presence = status_msg.gps_presence
-    #     new_status_msg.is_gpspos = status_msg.is_gpspos
-    #     new_status_msg.gps_type = status_msg.gps_type
-    #     new_status_msg.is_gpsvel = status_msg.is_gpsvel
-    #     new_status_msg.gps_vel_type = status_msg.gps_vel_type
-    #     new_status_msg.is_gps_hdt = status_msg.is_gps_hdt
-    #     new_status_msg.is_magnetometer = status_msg.is_magnetometer
-    #     new_status_msg.is_imu = status_msg.is_imu
-    #     new_status_msg.ekf_status = status_msg.ekf_status
-    #     self.status_pub.publish(new_status_msg)
-
-#     def spin(self):
-#         rate = rospy.Rate(1)  # 1 Hz
-#         while not rospy.is_shutdown():
-#             status_msg = self.check_status()
-#             self.publish_system_status(status_msg)
-#             rate.sleep()
-
-
-# if __name__ == "__main__":
-#     rospy.init_node("usv_status_monitor")
-#     monitor = USV_monitor()
-#     monitor.spin()
 
 
