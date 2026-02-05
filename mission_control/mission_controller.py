@@ -153,7 +153,8 @@ class MissionController:
         self.pub_status = rospy.Publisher('/usv_status', Int32, queue_size=10)
         self.pub_vel_cmd = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self.gps_goal_2convert = rospy.Publisher('/initial_navsat_fix', NavSatFix, queue_size=1)
-        self.pub_abort_current_goal = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        self.pub_abort_current_goal = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)        
+        self.heartbeat = rospy.Publisher('/mission_controller/heartbeat', std_msgs.msg.Header, queue_size=10)
         self.sub_cc_cmd_vel = rospy.Subscriber('/CC/cmd_vel', Twist, self.cmd_vel_cc_callback) # spostato
         self.sub_move_base_cmd_vel = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_move_base_callback)
         #self.sub_goal_reached = rospy.Subscriber('/move_base/status', GoalStatusArray, self.usv_status_callback)
@@ -674,7 +675,8 @@ class MissionController:
             self.gndStationIf.pub_telemetry(self.usv_status, self.get_usv_pos_global())
 
     def state_machine(self):
-
+        
+        self.heartbeat.publish(std_msgs.msg.Header(stamp=rospy.Time.now()))
         # Macchina a stati del mission controller
         # Stato 0: Inattivo in attesa
         if self.usv_status == mappa_degli_stati_usv[0]:
