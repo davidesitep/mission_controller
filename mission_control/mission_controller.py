@@ -1101,6 +1101,22 @@ class MissionController:
             if self.is_remote_control:
                 self.pub_abort_current_goal.publish(GoalID()) # Comando di abort
                 self.jump_to_state(3) # Passa a 3: 'controllo remoto'
+            else:
+                goal = MoveBaseGoal()
+                goal.target_pose.header = Header()
+                goal.target_pose.header.seq = 0
+                goal.target_pose.header.stamp = rospy.Time.now()
+                goal.target_pose.header.frame_id = "map"
+                goal.target_pose.pose.position.x = 0.0 # Presumibilmente le coordinate del punto di docking saranno note
+                goal.target_pose.pose.position.y = 0.0 # Presumibilmente le coordinate del punto di docking saranno note
+                goal.target_pose.pose.position.z = 0.0
+                goal.target_pose.pose.orientation.w = 1.0
+                goal.target_pose.pose.orientation.x = 0.0
+                goal.target_pose.pose.orientation.y = 0.0
+                goal.target_pose.pose.orientation.z = 0.0
+                # ------------------------------------------------
+                rospy.loginfo(f"Invio del Goal ActionLib: X={waypoint[0]}, Y={waypoint[1]} m nel frame '{FRAME_ID_MAP}'")
+                self.move_base_client.send_goal(goal)
 
             
             rospy.loginfo("STATO: docking in corso")
