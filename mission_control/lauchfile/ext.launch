@@ -1,0 +1,12 @@
+<!-- Il loro file esistente: main.launch -->
+<launch>
+    <!-- I loro nodi esistenti -->
+    <!--include file="$(find loro_pkg)/launch/navigation.launch"/>
+    <include file="$(find loro_pkg)/launch/sensors.launch"/-->
+    
+    <!-- AGGIUNTA: il tuo sistema mission control -->
+    <include file="$(find usv_mission_control)/launch/mission_control.launch">
+        <arg name="mission_dir" value="/home/usv/missions"/>
+        <arg name="drone_id" value="1"/>
+    </include>
+</launch>

@@ -76,7 +76,6 @@ class Watchdog:
                 self.restart_attempts += 1
             else:
                 rospy.logerr("Impossibile riavviare il Mission Controller numero massimo di tentativi raggiunto.")
-                rospy.logwarn("Verifica dello stato del ROS Maser...")
                 self.alert_level = 3
                 self.raise_alert(time_since_heartbeat, self.alert_level)
                 self.emergency_stop()

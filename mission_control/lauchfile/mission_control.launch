@@ -1,0 +1,24 @@
+<launch>
+    <!-- Parametri configurabili -->
+    <arg name="mission_dir" default="/home/usv/missions"/>
+    <arg name="drone_id" default="1"/>
+    
+    <!-- Diagnostic Node (monitora sensori) -->
+    <node name="usv_diagnostic" pkg="usv_mission_control" type="diagnostic.py" 
+          output="screen" respawn="false"/>
+    
+    <!-- Mission Controller (logica principale) -->
+    <node name="mission_controller" pkg="usv_mission_control" type="mission_controller.py" 
+          output="screen" respawn="false">
+        <param name="mission_directory" value="$(arg mission_dir)"/>
+        <param name="drone_id" value="$(arg drone_id)"/>
+    </node>
+    
+    <!-- ROS Watchdog (monitora mission_controller) -->
+    <node name="mission_watchdog" pkg="usv_mission_control" type="watchdog_node.py" 
+          output="screen" respawn="true"/>
+    
+    <!-- Mission External Interface (comunicazione stazione remota) -->
+    <node name="mission_ext_interface" pkg="usv_mission_control" type="mission_ext_interface.py" 
+          output="screen" respawn="false"/>
+</launch>
