@@ -21,4 +21,14 @@
     <!-- Mission External Interface (comunicazione stazione remota) -->
     <node name="mission_ext_interface" pkg="usv_mission_control" type="mission_ext_interface.py" 
           output="screen" respawn="false"/>
+
+    <!-- Configura directory log personalizzata -->
+    <env name="ROS_LOG_DIR" value="/home/usv/logs/ros"/>
+    
+    <!-- I tuoi nodi... -->
+    <node name="mission_controller" pkg="usv_mission_control" type="mission_controller.py" 
+          output="screen">
+        <!-- Log specifico per questo nodo -->
+        <env name="ROSCONSOLE_CONFIG_FILE" value="$(find usv_mission_control)/config/rosconsole.conf"/>
+    </node>
 </launch>
