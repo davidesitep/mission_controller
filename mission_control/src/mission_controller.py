@@ -21,7 +21,7 @@ import json
 from typing import NamedTuple
 from std_msgs.msg import Header
 from std_msgs.msg import String
-from std_msgs.msg import Int32, Int16, Bool
+from std_msgs.msg import Int32, Bool
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav_msgs.srv import GetPlan
@@ -35,6 +35,8 @@ from move_base_msgs.msg import MoveBaseActionFeedback, MoveBaseActionResult, Mov
 from diagnostic import UsvDiagnostic
 from mission_ext_interface import missionExtInterface
 from rosgraph import Master, MasterException
+from utility.usv_logger import USVLogger
+import psutil
 
 
 DEBUG = True
@@ -65,7 +67,8 @@ mappa_degli_stati_usv = {
     2: "Navigazione autonoma",
     3: "Navigazione da remoto",
     4: "Errore minore", 
-    5: "Errore critico"
+    5: "Errore critico",
+    6: "Docking"
     }
 
 mappa_move_base_status = {
@@ -144,7 +147,9 @@ class MissionController:
         self.move_base_cmd_vel = Twist()
         self.minor_error = False
         self.major_error = False
-        self.system_status = Int16
+        self.system_status = None
+        # Inizializzazione nodo ROS (deve precedere publishers, subscribers e classi che li creano)
+        rospy.init_node('mission_controller', anonymous=True)
         # Altre classi
         self.usvDiagnostic = UsvDiagnostic()
         self.gndStationIf = missionExtInterface(MISSION_DIRECTORY_PATH, DRONE_ID)
@@ -154,25 +159,35 @@ class MissionController:
         self.pub_vel_cmd = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self.gps_goal_2convert = rospy.Publisher('/initial_navsat_fix', NavSatFix, queue_size=1)
         self.pub_abort_current_goal = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)        
-        self.heartbeat = rospy.Publisher('/mission_controller/heartbeat', std_msgs.msg.Header, queue_size=10)
+        self.heartbeat = rospy.Publisher('/mission_controller/heartbeat', Header, queue_size=10)
         self.sub_cc_cmd_vel = rospy.Subscriber('/CC/cmd_vel', Twist, self.cmd_vel_cc_callback) # spostato
         self.sub_move_base_cmd_vel = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_move_base_callback)
         #self.sub_goal_reached = rospy.Subscriber('/move_base/status', GoalStatusArray, self.usv_status_callback)
         self.goal_feedback = rospy.Subscriber('/move_base/feedback', MoveBaseActionFeedback, self.usv_feedback_callback)
-        self.result = None 
-        self.sub_diagnostic_status = rospy.Subscriber('/usv_status_monitor/diagnostic/status', Int16, self.diagnostic_status_callback)
+        self.result = None
         self.sub_remote_request = rospy.Subscriber('/cc/remote_cmd', Bool, self.remote_cmd_callback) # spostato
         self.last_cmd_vel_time = None
         self.last_cmd_vel_time_move_base = None
         self.pending_time = None
-        rospy.init_node('mission_controller', anonymous=True)
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
         self.timer = rospy.Timer(rospy.Duration(1.0), self.run) # Avvia la macchina a stati in un thread separato
-
+        
+        self.logger = USVLogger(
+            log_dir=MISSION_DIRECTORY_PATH,
+            log_name="mission_controller"
+            )
+        
+        # Log avvio del sistema
+        self.logger.system_logger.info("="*50)
+        self.logger.system_logger.info("Mission Controller avviato")
+        self.logger.system_logger.info("="*50)
+        
+        # Variabili per performance tracking
+        self.loop_start_time = None
     
 
     # Funzioni interne
-    def start_control_node():
+    def start_control_node(self):
         rospy.loginfo("Mission controller avviato.")
         rospy.spin() # Gestisco i callback ROS
 
@@ -249,12 +264,12 @@ class MissionController:
         if self.usv_status in [mappa_degli_stati_usv[1], mappa_degli_stati_usv[2]]:
 
             if self.is_remote_control:
-                if self.last_cmd_vel_time and self.last_cmd_vel_time - rospy.get_time() > CMD_VEL_TIMEOUT:
+                if self.last_cmd_vel_time and rospy.get_time() - self.last_cmd_vel_time > CMD_VEL_TIMEOUT:
                     return Twist() # Torno velocità zero se non ricevo comandi da più di CMD_VEL_TIMEOUT secondi
                 else:
                     return self.cc_cmd_vel
             else:
-                if self.last_cmd_vel_time_move_base and self.last_cmd_vel_time_move_base - rospy.get_time() > CMD_VEL_TIMEOUT:
+                if self.last_cmd_vel_time_move_base and rospy.get_time() - self.last_cmd_vel_time_move_base > CMD_VEL_TIMEOUT:
                     return Twist()
                 else:
                     return self.move_base_cmd_vel
@@ -335,16 +350,21 @@ class MissionController:
                 rospy.logerr("La IMU interna al sensore Ellipse non è disponibile.")
 
             # Setto il minor error
-            if not sensor_fail[0] or not sensor_fail[1]:
+            if sensor_fail[0] or sensor_fail[1]:
                 self.minor_error = True
-            elif sensor_fail[0] and sensor_fail[1]:
+            elif not sensor_fail[0] and not sensor_fail[1]:
                 self.minor_error = False
-
+            elif sensor_fail[0] and not sensor_fail[1]:
+                self.minor_error = True
+            elif not sensor_fail[0] and sensor_fail[1]:
+                self.minor_error = True
+    
         else:
             self.minor_error = True
             rospy.logerr("Sensore Ellipse non disponibile.")
 
 
+    @staticmethod
     def calculatePose(waypoint1, waypoint2):
         """
         Calcola l'orientamento in quaternioni tra due punti convertiti in coordinate cartesiane
@@ -665,6 +685,10 @@ class MissionController:
 
         self.can_jump = True
         while self.can_jump and not rospy.is_shutdown():
+
+            loop_start_time = time.time()
+            old_status = self.usv_status
+
             self.can_jump = False
             # Eseguo la diagnostica
             self.system_status = self.usvDiagnostic.get_usv_status()
@@ -674,19 +698,50 @@ class MissionController:
             # Pubblico/Eseguo la telemetria
             self.gndStationIf.pub_telemetry(self.usv_status, self.get_usv_pos_global())
 
+            # ===== LOGGING AGGIUNTIVO =====
+        
+            # 1. Log cambio stato
+            if old_status != self.usv_status:
+                self.logger.log_state_change(old_status, self.usv_status)
+                rospy.loginfo(f"Stato cambiato: {old_status} -> {self.usv_status}")  # Mantieni anche ROS log
+            
+            # 2. Log telemetria (ogni ciclo)
+            if hasattr(self, 'current_position') and self.current_position:
+                self.logger.log_telemetry(
+                    lat=self.current_position[0],
+                    lon=self.current_position[1],
+                    sog=self.vel_media if hasattr(self, 'vel_media') else 0.0,
+                    cog=self.current_heading if hasattr(self, 'current_heading') else 0.0,
+                    state=self.usv_status
+                )
+            
+            # 3. Log performance (ogni 10 cicli per non riempire troppo)
+            if not hasattr(self, '_perf_counter'):
+                self._perf_counter = 0
+            
+            self._perf_counter += 1
+            if self._perf_counter >= 10:
+                self._perf_counter = 0
+                process = psutil.Process()
+                cpu_percent = process.cpu_percent()
+                mem_mb = process.memory_info().rss / 1024 / 1024
+                loop_time_ms = (time.time() - loop_start_time) * 1000
+                
+                self.logger.log_performance(cpu_percent, mem_mb, loop_time_ms)
+
     def state_machine(self):
         
-        self.heartbeat.publish(std_msgs.msg.Header(stamp=rospy.Time.now()))
+        self.heartbeat.publish(Header(stamp=rospy.Time.now()))
         # Macchina a stati del mission controller
         # Stato 0: Inattivo in attesa
         if self.usv_status == mappa_degli_stati_usv[0]:
             rospy.loginfo("STATO: inattivo in attesa")
             # Leggo stati
             if self.is_remote_control:
-                self.jump_to_state(2) # Passa a 'controllo remoto'
-                
+                self.jump_to_state(3) # Passa a 3: 'controllo remoto'
+
             elif self.is_valid_mission and not self.is_remote_control:
-                self.jump_to_state(5) # Passa a 'avvio nav. autonoma'
+                self.jump_to_state(1) # Passa a 1: 'avvio nav. autonoma'
                 
             else:                    
                 # Cerca una missione
@@ -735,16 +790,16 @@ class MissionController:
             if self.is_remote_control:
                 self.pub_abort_current_goal.publish(GoalID()) # Comando di abort
                 self.saveMissionInfo("suspended")
-                self.jump_to_state(2) # Passa a 2: 'controllo remoto'
+                self.jump_to_state(3) # Passa a 3: 'controllo remoto'
                 
             elif not self.is_remote_control and not self.is_valid_mission:
                 self.jump_to_state(0) # Torno in stato 0: inattivo in attesa
                 
             elif self.minor_error:
-                self.jump_to_state(3) # Passa a 3: 'errore minore'
-                
+                self.jump_to_state(4) # Passa a 4: 'errore minore'
+
             elif self.major_error:
-                self.jump_to_state(4) # Passa a 4: 'errore critico'
+                self.jump_to_state(5) # Passa a 5: 'errore critico'
                 
             else:
                 # Inizio della missione/navigazione
@@ -927,8 +982,8 @@ class MissionController:
                         rospy.loginfo("Missione completata") # Decideremo in seguito se la missione è completata o se non c'è nessuna missione.
                         self.is_valid_mission = False # Torno in stato 0: inattivo in attesa
                 
-            self.pub_status.publish(1)
-            
+            self.pub_status.publish(2)
+
         # Stato 3: Controllo remoto
         elif self.usv_status == mappa_degli_stati_usv[3]:
             rospy.loginfo("STATO: controllo remoto")
@@ -954,7 +1009,7 @@ class MissionController:
                 elif self.last_cmd_vel_time and ((rospy.get_time() - self.last_cmd_vel_time) < CMD_VEL_TIMEOUT):
                     self.pub_vel_cmd.publish(cmd_vel)
                     rospy.loginfo(f"In controllo remote: {cmd_vel}")             
-            self.pub_status.publish(2)
+            self.pub_status.publish(3)
 
         # Stato 3: Errore minore: qui decido in quale altra modalità passare:
         # caso 1: Input degradato
@@ -975,10 +1030,10 @@ class MissionController:
                 self.jump_to_state(0) # Torno in stato 0: idle (riparte il meccanismo di missione)
                 
             elif self.major_error:
-                self.jump_to_state(4) # Passo in 4: 'errore critico'
-                
+                self.jump_to_state(5) # Passo in 5: 'errore critico'
+
             elif self.is_remote_control:
-                self.jump_to_state(2) # Passa a 2: 'controllo remoto'
+                self.jump_to_state(3) # Passa a 3: 'controllo remoto'
                 
             else:
                 if "errore planner" in self.errori_minori:
@@ -1014,20 +1069,17 @@ class MissionController:
                 self.pub_vel_cmd.publish(Twist()) # Il vel multiplexer dovrebbe già fare in modo che in stato di errore minore non escano comandi di velocità
                 # Performo check di sistema
                 #self.sistem_check()
-            self.pub_status.publish(3)
-        
+            self.pub_status.publish(4)
+
         # Stato 5: Errore critico
         elif self.usv_status == mappa_degli_stati_usv[5]:
-            rospy.loginfo("STATO: errore critico")
-            if self.major_error:
-                self.pub_status.publish(4)
-                rospy.logerr("Errore critico! USV non risponde. Intervento richiesto.")
-                
-            elif not self.major_error and self.minor_error:
-                self.jump_to_state(3)
-                
-            else:
+            rospy.logerr("Errore critico! USV non risponde. Intervento richiesto.")
+            if not self.major_error and self.minor_error:
+                self.jump_to_state(4)
+
+            elif not self.major_error:
                 self.jump_to_state(0)
+            self.pub_status.publish(5)
                 
         # Navigazione in avvio: prima di passare alla navigazione vera e propria devo verificare che sia tutto ok
         # In particolare deve essere attivo: il planner, la trosformata della posa (tf) e in futuro dovrò controllare che il l'obstacle avoidance sia attivo 
@@ -1036,16 +1088,16 @@ class MissionController:
             rospy.loginfo("STATO: avvio planner")
             if self.is_remote_control:
                 rospy.loginfo("Passaggio in modalità controllo remoto in seguito a ricezione comando.")
-                self.jump_to_state(2)
+                self.jump_to_state(3)
                 
             elif all(self.nav_system_active):
                 rospy.loginfo("Planner attivo: passagio in navigazione autonoma. Calcolo del percorso...")
                 self.saveMissionInfo("iniziata")
-                self.jump_to_state(1)
+                self.jump_to_state(2)
                 
             elif not self.nav_system_active[0] and self.minor_error:
                 if self.is_valid_mission:
-                    self.jump_to_state(3)
+                    self.jump_to_state(4)
                     rospy.logerr("Il planner non funzionante, passare in modalità controllo rempoto.")
                     
                 else:
@@ -1054,7 +1106,7 @@ class MissionController:
                     
             elif not self.nav_system_active[1] and self.minor_error:
                 if self.is_valid_mission:
-                    self.jump_to_state(3)
+                    self.jump_to_state(4)
                     rospy.logerr("Il sitema di trasformazioni coordinate non funzionante, passare in modalità controllo rempoto.")
                     
                 else:
@@ -1127,6 +1179,36 @@ class MissionController:
             self.usv_status = mappa_degli_stati_usv[0] # Torno in stato di idle
             self.jump_to_state(0)
    
+    def send_goal(self, goal):
+        self.move_base_client.send_goal(goal)
+
+        # Log waypoint inviato
+        self.logger.log_waypoint(
+            wp_index=self.mission_index,
+            total_wp=len(self.waypoints),
+            lat=goal.target_pose.pose.position.x,
+            lon=goal.target_pose.pose.position.y,
+            status="SENT"
+        )
+        
+        rospy.loginfo(f"Goal inviato: waypoint {self.mission_index}")
+
+    # Devo capire dove inserirlo nel codice e cosa sostituisce, se qualcosa sostituisce. Potrebbe essere utile inserirlo in state_machine() ogni volta che invio un goal, così da avere un log di tutti i waypoint inviati e non solo di quelli raggiunti.
+    def handle_error(self, error_type, error_msg):
+        """Metodo per gestione errori con logging"""
+        # Log errore
+        self.logger.log_error(
+            error_type=error_type,
+            error_msg=error_msg,
+            context={
+                'state': self.usv_status,
+                'mission_index': self.mission_index,
+                'timestamp': time.time()
+            }
+        )
+    
+    # Anche log ROS per compatibilità
+    rospy.logerr(f"[{error_type}] {error_msg}")
 
 def is_roscore_running_master_check():
         """Controlla se roscore è attivo tentando di connettersi al Master ROS."""

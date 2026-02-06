@@ -15,7 +15,6 @@ from std_msgs.msg import Header
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 from actionlib_msgs.msg import GoalID
-from threading import Timer
 
 TIMEOUT = 15.0  # Tempo in secondi per considerare il mission_controller non responsivo, alcune operaazioni potrebbero richiedere più tempo, quindi è importante scegliere un timeout adeguato
 WATCHDOG_RATE = 2.0 # in secondi 0.5Hz
@@ -30,6 +29,7 @@ allert_map = {
 
 class Watchdog: 
     def __init__(self):
+        rospy.init_node('watchdog', anonymous=False)
         # Timeout massimo consentito tra due heartbeat
         self.timeout = TIMEOUT
         # Salva l'ultimo timestamp ricevuto dal heartbeat
@@ -49,7 +49,7 @@ class Watchdog:
         self.pub_abort_current_goal = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
         
         # Avvia un timer periodico che controlla la differenza tra il tempo attuale e l'ultimo heartbeat
-        self.periodic_timer = Timer(rospy.Duration(TIMEOUT).to_sec(), self.check_heartbeat)
+        self.periodic_timer = rospy.Timer(rospy.Duration(WATCHDOG_RATE), self.check_heartbeat)
      
     def heartbeat_callback(self, msg):
         # Callback chiamata ogni volta che riceve un messaggio di heartbeat
@@ -57,7 +57,7 @@ class Watchdog:
         self.last_heartbeat_time = msg.stamp
         self.alert_level = 0
 
-    def check_heartbeat(self):
+    def check_heartbeat(self, event=None):
         # Funzione periodica che controlla se il mission_controller è vivo
         # Se non è stato mai ricevuto un heartbeat, logga e riavvia
         if self.last_heartbeat_time is None:

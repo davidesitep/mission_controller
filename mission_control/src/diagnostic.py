@@ -9,7 +9,7 @@
 #!/usr/bin/env python3
 
 import rospy
-from typing import NamedTuple
+from dataclasses import dataclass
 from std_msgs.msg import Int16
 from std_msgs.msg import Header
 from custom_msgs.msg import SystemStatus
@@ -27,18 +27,19 @@ mappa_stati_error = {
     4: 'EMERGENCY_STOP'
 }
 
-class system_status_struct(NamedTuple):
-    sensor_presence: bool
-    imu_presence: bool
-    gps_presence: bool
-    is_gpspos: bool
-    gps_type: int
-    is_gpsvel: bool
-    gps_vel_type: int
-    is_gps_hdt: bool
-    is_magnetometer: bool
-    is_imu: bool
-    ekf_status: int
+@dataclass
+class system_status_struct:
+    sensor_presence: bool = True
+    imu_presence: bool = True
+    gps_presence: bool = True
+    is_gpspos: bool = True
+    gps_type: int = 0
+    is_gpsvel: bool = True
+    gps_vel_type: int = 0
+    is_gps_hdt: bool = True
+    is_magnetometer: bool = True
+    is_imu: bool = True
+    ekf_status: int = 0
 
 
 # Classe dedicata al monitoraggio dello stato dell'USV
@@ -61,7 +62,7 @@ class UsvDiagnostic:
         self._diagnostic_stato_shipm = None
         self._diagnostic_stato_generale = None
         self._diagnostic_stato_motore = None
-        self.status = system_status_struct(True, True, True, True, 0, True, 0, True, True, True, 0)
+        self.status = system_status_struct()
 
         # Subscribers
         sub_imu = rospy.Subscriber("/sbg/imu_data", SbgImuData, self.imu_callback)
@@ -148,13 +149,13 @@ class UsvDiagnostic:
             fault_count += 1
 
         if fault_count == 0:
-            self.diagnostic_stato_ekf = 0 # Ekf ok
+            self._diagnostic_stato_ekf = 0 # Ekf ok
         elif fault_count == 1:
-            self.diagnostic_stato_ekf = 1 # Ekf sufficient
+            self._diagnostic_stato_ekf = 1 # Ekf sufficient
         elif fault_count == 2:
-            self.diagnostic_stato_ekf = 2 # Ekf poor
+            self._diagnostic_stato_ekf = 2 # Ekf poor
         elif fault_count == 3:
-            self.diagnostic_stato_ekf = 3 # Ekf None
+            self._diagnostic_stato_ekf = 3 # Ekf None
 
     def gps_vel_callback(self, msg):
         """
@@ -165,15 +166,15 @@ class UsvDiagnostic:
         else:
                     
             if msg.status.vel_type == 0:
-                self._diagnostic_stato_gps = 1 # No valid velocity (none)
+                self._diagnostic_stato_gpsvel = 1 # No valid velocity (none)
             elif msg.status.vel_type == 1:
-                self._diagnostic_stato_gps = 2 # Unknown solution (very poor)
+                self._diagnostic_stato_gpsvel = 2 # Unknown solution (very poor)
             elif msg.status.vel_type == 2:
-                self._diagnostic_stato_gps = 3 # Doppler velocity (good)
+                self._diagnostic_stato_gpsvel = 3 # Doppler velocity (good)
             elif msg.status.vel_type == 4:
-                self._diagnostic_stato_gps = 4 # Differential velocity (very good)
+                self._diagnostic_stato_gpsvel = 4 # Differential velocity (very good)
             else:
-                self._diagnostic_stato_gps = 1 # None
+                self._diagnostic_stato_gpsvel = 1 # None
 
     def gps_hdt_callback(self, msg):
         """
@@ -237,13 +238,13 @@ class UsvDiagnostic:
             if self._diagnostic_stato_imu:
                 self.status.is_imu = True
             else:
-                self.is_imu = False
-            
+                self.status.is_imu = False
+
             if self._diagnostic_stato_mag in [2,3]:
                 self.status.is_magnetometer = True
             else:
-                self.status = False
-            
+                self.status.is_magnetometer = False
+
         # ---------------- Both Senson on --------------------
         elif self._diagnostic_stato_generale == 4: # Sensor On
             self.status.gps_presence = True
@@ -259,7 +260,7 @@ class UsvDiagnostic:
             else:
                 self.status.is_gps_hdt = False
             
-            if self.diagnostic_stato_gps in [1,2,3]:
+            if self._diagnostic_stato_gps in [1,2,3]:
                 self.status.is_gpspos = True
             else:
                 self.status.is_gpspos = False
@@ -267,14 +268,14 @@ class UsvDiagnostic:
             if self._diagnostic_stato_imu:
                 self.status.is_imu = True
             else:
-                self.is_imu = False
-            
+                self.status.is_imu = False
+
             if self._diagnostic_stato_mag in [2,3]:
                 self.status.is_magnetometer = True
             else:
-                self.status = False
-            
-            self.status.gps_type = self.diagnostic_stato_gps
+                self.status.is_magnetometer = False
+
+            self.status.gps_type = self._diagnostic_stato_gps
             self.status.gps_vel_type = self._diagnostic_stato_gpsvel
             
         return self.status
